@@ -4,45 +4,226 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Species Sightings</title>
+  <title>Species Sightings — Bird List</title>
   <style>
-    body { font-family: sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
-    form.inline { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end; }
-    label { display: block; font-size: 0.875rem; margin-bottom: 0.25rem; }
-    input, button { padding: 0.5rem; }
+    :root {
+      --bg: #0f172a;
+      --bg-card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #10b981;
+      --accent-dim: #059669;
+      --accent-glow: rgba(16,185,129,0.15);
+      --input-bg: #0f172a;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .navbar {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 3.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .navbar-logo {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .navbar-logo svg { width: 1.5rem; height: 1.5rem; }
+    .navbar-sep { flex: 1; }
+    .navbar-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .navbar-link:hover { background: var(--accent-glow); color: var(--accent); }
+    .main { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem; }
+    .page-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 1.5rem;
+    }
+    .page-title span { color: var(--accent); }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .card-title::before {
+      content: '';
+      display: inline-block;
+      width: 3px;
+      height: 1em;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    .filter-form { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .form-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .form-input {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+      height: 2.4rem;
+    }
+    .form-input:focus { border-color: var(--accent); }
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1.25rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      height: 2.4rem;
+      transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    /* Results table */
+    .results-table { width: 100%; border-collapse: collapse; }
+    .results-table th {
+      text-align: left;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      padding: 0 1rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .results-table td {
+      padding: 0.7rem 1rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .results-table tr:last-child td { border-bottom: none; }
+    .results-table tr:hover td { background: var(--accent-glow); }
+    .badge {
+      display: inline-block;
+      background: var(--accent-glow);
+      color: var(--accent);
+      border: 1px solid var(--accent-dim);
+      border-radius: 20px;
+      font-size: 0.75rem;
+      padding: 0.1rem 0.6rem;
+    }
+    .empty { color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0; }
+    .error-msg { color: #f87171; font-size: 0.875rem; margin-top: 0.5rem; }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      margin-bottom: 1.5rem;
+      transition: color 0.15s;
+    }
+    .back-link:hover { color: var(--accent); }
   </style>
 </head>
 <body>
-<h1>Species sightings</h1>
 
-<div class="card">
-  <form method="get" action="/species" class="inline">
-    <div>
-      <label for="name">Species</label>
-      <input id="name" name="name" value="{{.Species}}" placeholder="e.g. Eurasian Blackbird">
-    </div>
-    <div>
-      <button type="submit">Search</button>
-    </div>
-  </form>
-  {{if .Error}}<p>{{.Error}}</p>{{end}}
-</div>
+<nav class="navbar">
+  <a href="/" class="navbar-logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 17l4-8 4 4 3-6 4 10"/>
+      <path d="M21 12c0-1.5-.5-3-1.5-4"/>
+    </svg>
+    Bird List
+  </a>
+  <div class="navbar-sep"></div>
+  <a href="/" class="navbar-link">Overview</a>
+</nav>
 
-<div class="card">
-  <h2>Results for "{{.Species}}"</h2>
-  {{if .Sightings}}
-  <ul>
-    {{range .Sightings}}
-    <li>{{.ObservedAt.Format "2006-01-02"}} — {{.Location}} ({{.Region}}){{if .Notes}} — {{.Notes}}{{end}}</li>
+<main class="main">
+  <a href="/" class="back-link">
+    &#8592; Back to overview
+  </a>
+  <h1 class="page-title">Species <span>Sightings</span></h1>
+
+  <div class="card">
+    <div class="card-title">Search</div>
+    <form method="get" action="/species" class="filter-form">
+      <div class="form-group" style="flex:1; min-width:200px">
+        <label class="form-label" for="name">Species name</label>
+        <input class="form-input" id="name" name="name" value="{{.Species}}" placeholder="e.g. Eurasian Blackbird" style="width:100%">
+      </div>
+      <button type="submit" class="btn">Search</button>
+    </form>
+    {{if .Error}}<p class="error-msg">{{.Error}}</p>{{end}}
+  </div>
+
+  {{if .Species}}
+  <div class="card">
+    <div class="card-title">Results for &ldquo;{{.Species}}&rdquo;</div>
+    {{if .Sightings}}
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Location</th>
+          <th>Region</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Sightings}}
+        <tr>
+          <td>{{.ObservedAt.Format "2006-01-02"}}</td>
+          <td>{{.Location}}</td>
+          <td><span class="badge">{{.Region}}</span></td>
+          <td style="color: var(--text-muted)">{{if .Notes}}{{.Notes}}{{else}}&mdash;{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">No sightings found for &ldquo;{{.Species}}&rdquo;.</p>
     {{end}}
-  </ul>
-  {{else}}
-  <p>No sightings found.</p>
+  </div>
   {{end}}
-</div>
+</main>
 
-<p><a href="/">Back to overview</a></p>
 </body>
 </html>
 {{end}}
