@@ -19,5 +19,11 @@ go run ./cmd/birdlist
 
 Then open `http://localhost:8080`.
 
+Use a different port if needed:
+
+```bash
+go run ./cmd/birdlist -port 9090
+```
+
 By default, data is stored in `data/birds.db`.
 Override with `BIRD_LIST_DB` if needed.
