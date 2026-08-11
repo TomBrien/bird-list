@@ -1,0 +1,48 @@
+{{define "species"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Species Sightings</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    form.inline { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end; }
+    label { display: block; font-size: 0.875rem; margin-bottom: 0.25rem; }
+    input, button { padding: 0.5rem; }
+  </style>
+</head>
+<body>
+<h1>Species sightings</h1>
+
+<div class="card">
+  <form method="get" action="/species" class="inline">
+    <div>
+      <label for="name">Species</label>
+      <input id="name" name="name" value="{{.Species}}" placeholder="e.g. Eurasian Blackbird">
+    </div>
+    <div>
+      <button type="submit">Search</button>
+    </div>
+  </form>
+  {{if .Error}}<p>{{.Error}}</p>{{end}}
+</div>
+
+<div class="card">
+  <h2>Results for "{{.Species}}"</h2>
+  {{if .Sightings}}
+  <ul>
+    {{range .Sightings}}
+    <li>{{.ObservedAt.Format "2006-01-02"}} — {{.Location}} ({{.Region}}){{if .Notes}} — {{.Notes}}{{end}}</li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p>No sightings found.</p>
+  {{end}}
+</div>
+
+<p><a href="/">Back to overview</a></p>
+</body>
+</html>
+{{end}}

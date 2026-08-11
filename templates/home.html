@@ -1,0 +1,72 @@
+{{define "home"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bird List</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    form.inline { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end; }
+    label { display: block; font-size: 0.875rem; margin-bottom: 0.25rem; }
+    input, select, button { padding: 0.5rem; }
+  </style>
+</head>
+<body>
+<h1>Bird List</h1>
+
+<div class="card">
+  <form method="get" action="/" class="inline">
+    <div>
+      <label for="year">Year</label>
+      <input id="year" name="year" value="{{.SelectedYear}}" placeholder="All time">
+    </div>
+    <div>
+      <label for="location">Location</label>
+      <select id="location" name="location">
+        {{range .LocationOptions}}
+        <option value="{{.Value}}" {{if eq $.SelectedLocation .Value}}selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div>
+      <button type="submit">Apply filters</button>
+    </div>
+  </form>
+  {{if .Error}}<p>{{.Error}}</p>{{end}}
+</div>
+
+<div class="card">
+  <h2>Lifetime count</h2>
+  <p><strong>{{.TotalCount}}</strong> sightings</p>
+</div>
+
+<div class="card">
+  <h2>Notable recent additions</h2>
+  {{if .RecentAdditions}}
+  <ul>
+    {{range .RecentAdditions}}
+    <li>{{.Species}} — first seen {{.FirstObservedAt.Format "2006-01-02"}} at {{.Location}}</li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p>No sightings yet.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <h2>Search species</h2>
+  <form method="get" action="/species" class="inline">
+    <div>
+      <label for="name">Species</label>
+      <input id="name" name="name" placeholder="e.g. Eurasian Blackbird">
+    </div>
+    <div>
+      <button type="submit">View sightings</button>
+    </div>
+  </form>
+</div>
+</body>
+</html>
+{{end}}
