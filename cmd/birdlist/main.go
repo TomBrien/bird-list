@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +15,9 @@ import (
 )
 
 func main() {
+	port := flag.Int("port", 8080, "HTTP port to listen on")
+	flag.Parse()
+
 	dsn := os.Getenv("BIRD_LIST_DB")
 	if dsn == "" {
 		dsn = filepath.Join("data", "birds.db")
@@ -33,7 +38,7 @@ func main() {
 		log.Fatalf("connect db: %v", err)
 	}
 
-	addr := ":8080"
+	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("starting bird-list on %s", addr)
 	if err := http.ListenAndServe(addr, server.Router()); err != nil {
 		log.Fatalf("server exited: %v", err)
