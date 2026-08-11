@@ -2,6 +2,10 @@
 
 Groundwork for a Go web app to track bird sightings.
 
+## Screenshot
+
+![Main page](docs/screenshot.png)
+
 ## Features currently scaffolded
 
 - SQLite-backed persistence for sightings
