@@ -14,6 +14,7 @@ Groundwork for a Go web app to track bird sightings.
   - Filter controls for year and location (`uk`, `global`, `western_palearctic`)
   - Notable recent additions (most recently added first sightings per species)
 - Species search via `/species?name=...` showing all sightings for a species
+- Import BTO BirdTrack `.xlsx` exports from the `Records#1` worksheet
 
 ## Run locally
 

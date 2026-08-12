@@ -33,7 +33,7 @@ func TestHomePageShowsLifetimeCount(t *testing.T) {
 	server, db := setupTestServer(t)
 	defer db.Close()
 
-	_, err := db.Exec(`INSERT INTO sightings (species, observed_at, location, region, notes) VALUES (?, ?, ?, ?, '')`, "Robin", time.Now().UTC(), "London", "uk")
+	_, err := db.Exec(`INSERT INTO sightings (species, observed_at, location, region, notes, taxonomy_rank) VALUES (?, ?, ?, ?, '', ?)`, "Robin", time.Now().UTC(), "London", "uk", 1)
 	if err != nil {
 		t.Fatalf("insert row: %v", err)
 	}
@@ -45,12 +45,12 @@ func TestHomePageShowsLifetimeCount(t *testing.T) {
 		t.Fatalf("want status 200, got %d, body: %s", rec.Code, rec.Body.String())
 	}
 	body, _ := io.ReadAll(rec.Body)
-	if !strings.Contains(string(body), "1</strong> sightings") {
+	if !strings.Contains(string(body), `class="stat">1</div>`) {
 		t.Fatalf("expected lifetime count in response body")
 	}
 }
 
-func TestSpeciesPageRequiresName(t *testing.T) {
+func TestSpeciesPageShowsSpeciesListWithoutName(t *testing.T) {
 	server, db := setupTestServer(t)
 	defer db.Close()
 
@@ -60,7 +60,7 @@ func TestSpeciesPageRequiresName(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want status 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Please provide a species name") {
-		t.Fatalf("expected validation message")
+	if !strings.Contains(rec.Body.String(), "All species") {
+		t.Fatalf("expected species list heading")
 	}
 }
