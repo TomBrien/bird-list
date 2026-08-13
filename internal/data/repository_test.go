@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -147,6 +148,36 @@ VALUES
 	}
 	if len(species) != 1 || species[0].Name != "Bluethroat" || !species[0].IsSynthetic || len(species[0].Children) != 1 {
 		t.Fatalf("want synthetic Bluethroat parent with one child, got %#v", species)
+	}
+}
+
+func TestVisitsGroupsSightingsByDateAndLocation(t *testing.T) {
+	repo := setupTestRepo(t)
+	btoData, err := json.Marshal([]BTOField{{Label: "Weather", Value: "Sunny intervals"}})
+	if err != nil {
+		t.Fatalf("encode BTO fields: %v", err)
+	}
+	_, err = repo.db.Exec(`
+INSERT INTO sightings (species, count, observed_at, location, region, notes, latitude, longitude, bto_data)
+VALUES
+	('Robin', '2', '2025-04-01 09:00:00', 'Bute Park', 'uk', 'End time: 10:30', 51.49, -3.19, ?),
+	('Grey Wagtail', '1', '2025-04-01 09:15:00', 'Bute Park', 'uk', '', 51.49, -3.19, ?),
+	('Coot', '1', '2025-04-02 09:00:00', 'Roath Park', 'uk', '', NULL, NULL, '[]')`,
+		string(btoData), string(btoData))
+	if err != nil {
+		t.Fatalf("insert visit sightings: %v", err)
+	}
+
+	visits, err := repo.Visits(context.Background())
+	if err != nil {
+		t.Fatalf("load visits: %v", err)
+	}
+	if len(visits) != 2 {
+		t.Fatalf("want 2 visits, got %d", len(visits))
+	}
+	visit := visits[1]
+	if visit.Location != "Bute Park" || visit.StartTime.Format("15:04") != "09:00" || visit.EndTime != "10:30" || visit.Weather != "Sunny intervals" || len(visit.Species) != 2 {
+		t.Fatalf("want grouped Bute Park visit, got %#v", visit)
 	}
 }
 

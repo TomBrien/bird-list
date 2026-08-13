@@ -1,7 +1,6 @@
 package data
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	_ "embed"
@@ -60,6 +59,22 @@ type BTOField struct {
 	Value string
 }
 
+type VisitSpecies struct {
+	Name  string
+	Count string
+}
+
+type Visit struct {
+	Date      time.Time
+	Location  string
+	StartTime time.Time
+	EndTime   string
+	Weather   string
+	Latitude  sql.NullFloat64
+	Longitude sql.NullFloat64
+	Species   []VisitSpecies
+}
+
 type Species struct {
 	Name                 string
 	Count                int
@@ -87,8 +102,8 @@ type taxon struct {
 	englishName          string
 }
 
-//go:embed british_list.xlsx
-var britishListWorkbook []byte
+//go:embed british_list.json
+var britishListTaxonomy []byte
 
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db, taxonomy: loadTaxonomy()}
@@ -159,6 +174,12 @@ ON CONFLICT(key) DO NOTHING`, CountModeModern); err != nil {
 	if _, err := r.db.ExecContext(ctx, `
 INSERT INTO preferences (key, value)
 VALUES ('include_off_list', 'false')
+ON CONFLICT(key) DO NOTHING`); err != nil {
+		return err
+	}
+	if _, err := r.db.ExecContext(ctx, `
+INSERT INTO preferences (key, value)
+VALUES ('species_order', 'alphabetical')
 ON CONFLICT(key) DO NOTHING`); err != nil {
 		return err
 	}
@@ -266,6 +287,32 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value`, countMode)
 	return err
 }
 
+func (r *Repository) SpeciesOrder(ctx context.Context) (string, error) {
+	var order string
+	if err := r.db.QueryRowContext(ctx, `SELECT value FROM preferences WHERE key = 'species_order'`).Scan(&order); err != nil {
+		return "", err
+	}
+	if !isSpeciesOrder(order) {
+		return "alphabetical", nil
+	}
+	return order, nil
+}
+
+func (r *Repository) SetSpeciesOrder(ctx context.Context, order string) error {
+	if !isSpeciesOrder(order) {
+		return fmt.Errorf("unsupported species order %q", order)
+	}
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO preferences (key, value)
+VALUES ('species_order', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, order)
+	return err
+}
+
+func isSpeciesOrder(order string) bool {
+	return order == "alphabetical" || order == "taxonomic" || order == "recent"
+}
+
 func (r *Repository) RecentAdditions(ctx context.Context, filter Filter, limit int) ([]RecentAddition, error) {
 	if limit <= 0 {
 		return nil, errors.New("limit must be positive")
@@ -348,6 +395,92 @@ ORDER BY observed_at DESC, id DESC`, species)
 		result = append(result, s)
 	}
 	return result, rows.Err()
+}
+
+func (r *Repository) Visits(ctx context.Context) ([]Visit, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT species, count, observed_at, location, notes, latitude, longitude, bto_data
+FROM sightings
+ORDER BY observed_at DESC, location COLLATE NOCASE, species COLLATE NOCASE`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	visitsByKey := make(map[string]*Visit)
+	visitKeys := make([]string, 0)
+	speciesCounts := make(map[string]map[string][]string)
+	for rows.Next() {
+		var species, count, location, notes, btoData string
+		var observedAt time.Time
+		var latitude, longitude sql.NullFloat64
+		if err := rows.Scan(&species, &count, &observedAt, &location, &notes, &latitude, &longitude, &btoData); err != nil {
+			return nil, err
+		}
+		key := observedAt.Format("2006-01-02") + "\x00" + location
+		visit := visitsByKey[key]
+		if visit == nil {
+			visit = &Visit{Date: observedAt, Location: location, StartTime: observedAt}
+			visitsByKey[key] = visit
+			visitKeys = append(visitKeys, key)
+			speciesCounts[key] = make(map[string][]string)
+		}
+		if observedAt.Before(visit.StartTime) {
+			visit.StartTime = observedAt
+		}
+		if !visit.Latitude.Valid && latitude.Valid && longitude.Valid {
+			visit.Latitude, visit.Longitude = latitude, longitude
+		}
+		if endTime := visitEndTime(observedAt, notes); endTime != "" && endTime > visit.EndTime {
+			visit.EndTime = endTime
+		}
+		for _, field := range decodeBTOFields(btoData) {
+			if strings.Contains(strings.ToLower(field.Label), "weather") && field.Value != "" && !containsVisitValue(visit.Weather, field.Value) {
+				if visit.Weather != "" {
+					visit.Weather += "; "
+				}
+				visit.Weather += field.Value
+			}
+		}
+		speciesCounts[key][species] = append(speciesCounts[key][species], count)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	visits := make([]Visit, 0, len(visitKeys))
+	for _, key := range visitKeys {
+		visit := visitsByKey[key]
+		for species, counts := range speciesCounts[key] {
+			visit.Species = append(visit.Species, VisitSpecies{Name: species, Count: strings.Join(counts, ", ")})
+		}
+		sort.Slice(visit.Species, func(i, j int) bool {
+			return strings.ToLower(visit.Species[i].Name) < strings.ToLower(visit.Species[j].Name)
+		})
+		visits = append(visits, *visit)
+	}
+	return visits, nil
+}
+
+func visitEndTime(observedAt time.Time, notes string) string {
+	const prefix = "End time: "
+	if !strings.HasPrefix(notes, prefix) {
+		return ""
+	}
+	endTime, err := time.Parse("15:04", strings.TrimPrefix(notes, prefix))
+	if err != nil {
+		return ""
+	}
+	return time.Date(observedAt.Year(), observedAt.Month(), observedAt.Day(), endTime.Hour(), endTime.Minute(), 0, 0, observedAt.Location()).Format("15:04")
+}
+
+func containsVisitValue(values, value string) bool {
+	for _, existing := range strings.Split(values, "; ") {
+		if existing == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Repository) AllSpecies(ctx context.Context, query, order string) ([]Species, error) {
@@ -637,54 +770,28 @@ func (r *Repository) parseBTORecord(row []string, headers map[string]int) (impor
 }
 
 func loadTaxonomy() map[string]taxon {
-	workbook, err := excelize.OpenReader(bytes.NewReader(britishListWorkbook))
-	if err != nil {
-		panic(fmt.Sprintf("open embedded British List workbook: %v", err))
+	var records []taxonomyRecord
+	if err := json.Unmarshal(britishListTaxonomy, &records); err != nil {
+		panic(fmt.Sprintf("decode embedded British List taxonomy: %v", err))
 	}
-	defer func() { _ = workbook.Close() }()
-
-	rows, err := workbook.GetRows("British List taxon rank by row")
-	if err != nil || len(rows) == 0 {
-		panic(fmt.Sprintf("read embedded British List taxonomy worksheet: %v", err))
-	}
-	headers := make(map[string]int, len(rows[0]))
-	for index, header := range rows[0] {
-		headers[strings.TrimSpace(header)] = index
-	}
-	sortOrderIndex, hasSortOrder := headers["Sort order"]
-	rankIndex, hasRank := headers["Rank"]
-	scientificNameIndex, hasScientificName := headers["Scientific name"]
-	if !hasSortOrder || !hasRank || !hasScientificName {
-		panic("embedded British List taxonomy worksheet has unexpected columns")
-	}
-	englishNameIndex := taxonomyEnglishNameColumn(headers)
 
 	taxonomy := make(map[string]taxon)
-	for _, row := range rows[1:] {
-		if len(row) <= sortOrderIndex || len(row) <= rankIndex || len(row) <= scientificNameIndex {
+	for _, record := range records {
+		scientificName := normalizedTaxonName(record.ScientificName)
+		if scientificName == "" {
 			continue
 		}
-		sortOrder, err := strconv.Atoi(strings.TrimSpace(row[sortOrderIndex]))
-		if err != nil {
-			continue
+		isSubspecies := record.Rank == "Subspecies"
+		parentScientificName := ""
+		if isSubspecies {
+			parentScientificName = parentSpeciesScientificName(scientificName)
 		}
-		if scientificName := normalizedTaxonName(row[scientificNameIndex]); scientificName != "" {
-			rank := strings.TrimSpace(row[rankIndex])
-			isSubspecies := strings.EqualFold(rank, "Subspecies")
-			if !strings.EqualFold(rank, "Species") && !isSubspecies {
-				continue
-			}
-			parentScientificName := ""
-			if isSubspecies {
-				parentScientificName = parentSpeciesScientificName(scientificName)
-			}
-			englishName := ""
-			if englishNameIndex >= 0 && englishNameIndex < len(row) {
-				englishName = strings.TrimSpace(row[englishNameIndex])
-			}
-			taxonomy[scientificName] = taxon{rank: sortOrder, parentScientificName: parentScientificName, isSubspecies: isSubspecies, englishName: englishName}
+		taxonomy[scientificName] = taxon{
+			rank:                 record.SortOrder,
+			parentScientificName: parentScientificName,
+			isSubspecies:         isSubspecies,
+			englishName:          record.EnglishName,
 		}
-
 	}
 	if len(taxonomy) == 0 {
 		panic("embedded British List taxonomy worksheet has no species ranks")
@@ -694,19 +801,11 @@ func loadTaxonomy() map[string]taxon {
 	return taxonomy
 }
 
-func taxonomyEnglishNameColumn(headers map[string]int) int {
-	for _, name := range []string{"English name", "English Name", "Common name", "English vernacular name", "AviList International English name"} {
-		if index, exists := headers[name]; exists {
-			return index
-		}
-	}
-	for name, index := range headers {
-		normalized := strings.ToLower(name)
-		if strings.Contains(normalized, "english") && (strings.Contains(normalized, "name") || strings.Contains(normalized, "vernacular")) {
-			return index
-		}
-	}
-	return -1
+type taxonomyRecord struct {
+	SortOrder      int    `json:"sortOrder"`
+	Rank           string `json:"rank"`
+	ScientificName string `json:"scientificName"`
+	EnglishName    string `json:"englishName"`
 }
 
 func addHistoricSpecies(taxonomy map[string]taxon, historicScientificName, parentScientificName string) {

@@ -7,10 +7,12 @@ import (
 	"html/template"
 	"math"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/TomBrien/bird-list/internal/data"
 )
@@ -60,7 +62,24 @@ type SettingsPageData struct {
 type SightingPageData struct {
 	Sighting data.Sighting
 	MapURL   string
+	VisitURL string
 	Error    string
+}
+
+type VisitPageData struct {
+	Visits []VisitView
+	Error  string
+}
+
+type VisitView struct {
+	data.Visit
+	MapURL string
+	URL    string
+}
+
+type VisitDetailPageData struct {
+	Visit VisitView
+	Error string
 }
 
 func NewServer(db *sql.DB) (*Server, error) {
@@ -75,6 +94,8 @@ func NewServer(db *sql.DB) (*Server, error) {
 		filepath.Join(templateDir, "species.html"),
 		filepath.Join(templateDir, "settings.html"),
 		filepath.Join(templateDir, "sighting.html"),
+		filepath.Join(templateDir, "visits.html"),
+		filepath.Join(templateDir, "visit.html"),
 	)
 	if err != nil {
 		return nil, err
@@ -91,6 +112,8 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /", s.handleHome)
 	mux.HandleFunc("POST /import/bto", s.handleBTOImport)
 	mux.HandleFunc("GET /species", s.handleSpecies)
+	mux.HandleFunc("GET /visits", s.handleVisits)
+	mux.HandleFunc("GET /visits/{date}", s.handleVisit)
 	mux.HandleFunc("GET /api/species", s.handleSpeciesSuggestions)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("POST /settings/count-mode", s.handleCountMode)
@@ -200,8 +223,18 @@ func (s *Server) handleSpecies(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	species := strings.TrimSpace(r.URL.Query().Get("name"))
 	order := strings.TrimSpace(r.URL.Query().Get("order"))
-	if order != "taxonomic" && order != "recent" {
-		order = "alphabetical"
+	if order == "alphabetical" || order == "taxonomic" || order == "recent" {
+		if err := s.repo.SetSpeciesOrder(r.Context(), order); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save species order: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var err error
+		order, err = s.repo.SpeciesOrder(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to load species order: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 	speciesList, err := s.repo.AllSpecies(r.Context(), query, order)
 	if err != nil {
@@ -241,6 +274,58 @@ func (s *Server) handleSpeciesSuggestions(w http.ResponseWriter, r *http.Request
 	if err := json.NewEncoder(w).Encode(species); err != nil {
 		http.Error(w, fmt.Sprintf("failed to encode species suggestions: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func (s *Server) handleVisits(w http.ResponseWriter, r *http.Request) {
+	if err := s.EnsureSchema(r); err != nil {
+		http.Error(w, fmt.Sprintf("failed to initialize schema: %v", err), http.StatusInternalServerError)
+		return
+	}
+	visits, err := s.repo.Visits(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load visits: %v", err), http.StatusInternalServerError)
+		return
+	}
+	views := make([]VisitView, 0, len(visits))
+	for _, visit := range visits {
+		views = append(views, VisitView{
+			Visit: visit,
+			URL:   visitURL(visit.Date, visit.Location),
+		})
+	}
+	renderVisits(w, s.templates, VisitPageData{Visits: views})
+}
+
+func (s *Server) handleVisit(w http.ResponseWriter, r *http.Request) {
+	if err := s.EnsureSchema(r); err != nil {
+		http.Error(w, fmt.Sprintf("failed to initialize schema: %v", err), http.StatusInternalServerError)
+		return
+	}
+	date, err := time.ParseInLocation("2006-01-02", r.PathValue("date"), time.Local)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	location := strings.TrimSpace(r.URL.Query().Get("location"))
+	if location == "" {
+		http.NotFound(w, r)
+		return
+	}
+	visits, err := s.repo.Visits(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load visit: %v", err), http.StatusInternalServerError)
+		return
+	}
+	for _, visit := range visits {
+		if visit.Date.Format("2006-01-02") == date.Format("2006-01-02") && visit.Location == location {
+			renderVisit(w, s.templates, VisitDetailPageData{Visit: VisitView{
+				Visit:  visit,
+				MapURL: mapURLForCoordinates(visit.Latitude, visit.Longitude),
+			}})
+			return
+		}
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -352,13 +437,9 @@ func (s *Server) handleSighting(w http.ResponseWriter, r *http.Request) {
 	}
 	mapURL := ""
 	if sighting.Latitude.Valid && sighting.Longitude.Valid {
-		latitude := sighting.Latitude.Float64
-		longitude := sighting.Longitude.Float64
-		latitudeDelta := 0.0018
-		longitudeDelta := 0.5 / (111.32 * math.Cos(latitude*math.Pi/180))
-		mapURL = fmt.Sprintf("https://www.openstreetmap.org/export/embed.html?bbox=%.6f%%2C%.6f%%2C%.6f%%2C%.6f&layer=mapnik&marker=%.6f%%2C%.6f", longitude-longitudeDelta, latitude-latitudeDelta, longitude+longitudeDelta, latitude+latitudeDelta, latitude, longitude)
+		mapURL = mapURLForCoordinates(sighting.Latitude, sighting.Longitude)
 	}
-	renderSighting(w, s.templates, SightingPageData{Sighting: sighting, MapURL: mapURL})
+	renderSighting(w, s.templates, SightingPageData{Sighting: sighting, MapURL: mapURL, VisitURL: visitURL(sighting.ObservedAt, sighting.Location)})
 }
 
 func importMessage(imported string) string {
@@ -399,4 +480,29 @@ func renderSighting(w http.ResponseWriter, tmpl *template.Template, data Sightin
 	if err := tmpl.ExecuteTemplate(w, "sighting", data); err != nil {
 		http.Error(w, fmt.Sprintf("failed to render sighting page: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func renderVisits(w http.ResponseWriter, tmpl *template.Template, data VisitPageData) {
+	if err := tmpl.ExecuteTemplate(w, "visits", data); err != nil {
+		http.Error(w, fmt.Sprintf("failed to render visits: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func renderVisit(w http.ResponseWriter, tmpl *template.Template, data VisitDetailPageData) {
+	if err := tmpl.ExecuteTemplate(w, "visit", data); err != nil {
+		http.Error(w, fmt.Sprintf("failed to render visit: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func visitURL(date time.Time, location string) string {
+	return "/visits/" + date.Format("2006-01-02") + "?location=" + url.QueryEscape(location)
+}
+
+func mapURLForCoordinates(latitude, longitude sql.NullFloat64) string {
+	if !latitude.Valid || !longitude.Valid {
+		return ""
+	}
+	latitudeDelta := 0.0018
+	longitudeDelta := 0.5 / (111.32 * math.Cos(latitude.Float64*math.Pi/180))
+	return fmt.Sprintf("https://www.openstreetmap.org/export/embed.html?bbox=%.6f%%2C%.6f%%2C%.6f%%2C%.6f&layer=mapnik&marker=%.6f%%2C%.6f", longitude.Float64-longitudeDelta, latitude.Float64-latitudeDelta, longitude.Float64+longitudeDelta, latitude.Float64+latitudeDelta, latitude.Float64, longitude.Float64)
 }
