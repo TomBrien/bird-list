@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestHomePageShowsLifetimeCount(t *testing.T) {
 	server, db := setupTestServer(t)
 	defer db.Close()
 
-	_, err := db.Exec(`INSERT INTO sightings (species, observed_at, location, region, notes) VALUES (?, ?, ?, ?, '')`, "Robin", time.Now().UTC(), "London", "uk")
+	_, err := db.Exec(`INSERT INTO sightings (species, observed_at, location, region, notes, taxonomy_rank) VALUES (?, ?, ?, ?, '', ?)`, "Robin", time.Now().UTC(), "London", "uk", 1)
 	if err != nil {
 		t.Fatalf("insert row: %v", err)
 	}
@@ -45,12 +46,12 @@ func TestHomePageShowsLifetimeCount(t *testing.T) {
 		t.Fatalf("want status 200, got %d, body: %s", rec.Code, rec.Body.String())
 	}
 	body, _ := io.ReadAll(rec.Body)
-	if !strings.Contains(string(body), "1</strong> sightings") {
+	if !strings.Contains(string(body), `class="stat">1</div>`) {
 		t.Fatalf("expected lifetime count in response body")
 	}
 }
 
-func TestSpeciesPageRequiresName(t *testing.T) {
+func TestSpeciesPageShowsSpeciesListWithoutName(t *testing.T) {
 	server, db := setupTestServer(t)
 	defer db.Close()
 
@@ -60,7 +61,69 @@ func TestSpeciesPageRequiresName(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want status 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Please provide a species name") {
-		t.Fatalf("expected validation message")
+	if !strings.Contains(rec.Body.String(), "All species") {
+		t.Fatalf("expected species list heading")
+	}
+}
+
+func TestSpeciesPagePersistsSelectedOrder(t *testing.T) {
+	server, db := setupTestServer(t)
+	defer db.Close()
+
+	rec := httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/species?order=taxonomic", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want status 200, got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/species", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want status 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `name="order" value="taxonomic" checked`) {
+		t.Fatalf("expected persisted taxonomic order")
+	}
+}
+
+func TestVisitsPageRenders(t *testing.T) {
+	server, db := setupTestServer(t)
+	defer db.Close()
+
+	rec := httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/visits", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want status 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "<h1>Visits</h1>") {
+		t.Fatalf("expected visits page heading")
+	}
+}
+
+func TestVisitDetailAndSightingLink(t *testing.T) {
+	server, db := setupTestServer(t)
+	defer db.Close()
+
+	result, err := db.Exec(`
+INSERT INTO sightings (species, observed_at, location, region, notes, taxonomy_rank)
+VALUES (?, ?, ?, ?, '', ?)`, "Robin", time.Date(2025, 4, 1, 9, 0, 0, 0, time.Local), "Bute Park", "uk", 1)
+	if err != nil {
+		t.Fatalf("insert sighting: %v", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("get sighting ID: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/visits/2025-04-01?location=Bute+Park", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Robin") {
+		t.Fatalf("expected visit detail, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sightings/"+strconv.FormatInt(id, 10), nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `/visits/2025-04-01?location=Bute`) {
+		t.Fatalf("expected sighting visit link, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
