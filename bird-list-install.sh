@@ -54,6 +54,38 @@ install_docker() {
   fi
 }
 
+install_compose() {
+  if "${DOCKER[@]}" compose version >/dev/null 2>&1; then
+    return
+  fi
+
+  case "$(uname -m)" in
+    aarch64|arm64)
+      compose_arch="aarch64"
+      ;;
+    *)
+      echo "This installer supports Linux arm64 hosts only." >&2
+      exit 1
+      ;;
+  esac
+
+  if ! require_command curl; then
+    echo "Installing curl to download Docker Compose..."
+    install_packages curl ca-certificates
+  fi
+
+  local compose_plugin
+  compose_plugin="$(mktemp)"
+  trap 'rm -f "$compose_plugin"' RETURN
+  curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${compose_arch}" -o "$compose_plugin"
+  "${SUDO[@]}" install -D -m 0755 "$compose_plugin" /usr/local/lib/docker/cli-plugins/docker-compose
+
+  if ! "${DOCKER[@]}" compose version >/dev/null 2>&1; then
+    echo "Docker Compose v2 installation failed." >&2
+    exit 1
+  fi
+}
+
 port_is_in_use() {
   local port="$1"
   if require_command ss; then
@@ -94,10 +126,7 @@ else
   exit 1
 fi
 
-if ! "${DOCKER[@]}" compose version >/dev/null 2>&1; then
-  echo "Docker Compose v2 is required but unavailable." >&2
-  exit 1
-fi
+install_compose
 
 if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR/.git" ]]; then
   echo "$INSTALL_DIR exists but is not a Git repository; refusing to overwrite it." >&2
