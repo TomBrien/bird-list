@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -83,11 +84,14 @@ type VisitDetailPageData struct {
 }
 
 func NewServer(db *sql.DB) (*Server, error) {
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		return nil, fmt.Errorf("failed to determine template path")
+	templateDir := os.Getenv("BIRD_LIST_TEMPLATE_DIR")
+	if templateDir == "" {
+		_, currentFile, _, ok := runtime.Caller(0)
+		if !ok {
+			return nil, fmt.Errorf("failed to determine template path")
+		}
+		templateDir = filepath.Join(filepath.Dir(currentFile), "..", "..", "templates")
 	}
-	templateDir := filepath.Join(filepath.Dir(currentFile), "..", "..", "templates")
 
 	tmpl, err := template.ParseFiles(
 		filepath.Join(templateDir, "home.html"),
