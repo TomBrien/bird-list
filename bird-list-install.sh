@@ -165,13 +165,18 @@ fi
 install_compose
 install_buildx
 
-if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR/.git" ]]; then
+if [[ -e "$INSTALL_DIR" ]] && ! git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "$INSTALL_DIR exists but is not a Git repository; refusing to overwrite it." >&2
   exit 1
 fi
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
-  git -C "$INSTALL_DIR" pull --ff-only
+if [[ -e "$INSTALL_DIR" ]]; then
+  echo "Updating existing bird-list checkout from origin/main..."
+  git -C "$INSTALL_DIR" fetch origin main
+  if ! git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD; then
+    echo "Unable to fast-forward $INSTALL_DIR to origin/main; resolve local branch divergence or changes and run the installer again." >&2
+    exit 1
+  fi
 else
   git clone "$REPOSITORY_URL" "$INSTALL_DIR"
 fi
