@@ -54,20 +54,31 @@ install_docker() {
   fi
 }
 
-install_compose() {
-  if "${DOCKER[@]}" compose version >/dev/null 2>&1; then
-    return
-  fi
-
+arm64_plugin_arch() {
   case "$(uname -m)" in
     aarch64|arm64)
-      compose_arch="aarch64"
+      printf '%s\n' aarch64
       ;;
     *)
       echo "This installer supports Linux arm64 hosts only." >&2
       exit 1
       ;;
   esac
+}
+
+version_is_at_least() {
+  local version="$1"
+  local minimum="$2"
+  [[ "$(printf '%s\n%s\n' "$minimum" "$version" | sort -V | head -n1)" == "$minimum" ]]
+}
+
+install_compose() {
+  if "${DOCKER[@]}" compose version >/dev/null 2>&1; then
+    return
+  fi
+
+  local compose_arch
+  compose_arch="$(arm64_plugin_arch)"
 
   if ! require_command curl; then
     echo "Installing curl to download Docker Compose..."
@@ -82,6 +93,29 @@ install_compose() {
 
   if ! "${DOCKER[@]}" compose version >/dev/null 2>&1; then
     echo "Docker Compose v2 installation failed." >&2
+    exit 1
+  fi
+}
+
+install_buildx() {
+  local buildx_version
+  buildx_version="$("${DOCKER[@]}" buildx version 2>/dev/null | sed -n 's/.* v\{0,1\}\([0-9][0-9.]*\).*/\1/p')"
+  if [[ -n "$buildx_version" ]] && version_is_at_least "$buildx_version" "0.17.0"; then
+    return
+  fi
+
+  echo "Installing Docker Buildx 0.17.1..."
+  local buildx_arch
+  buildx_arch="$(arm64_plugin_arch)"
+  local buildx_plugin
+  buildx_plugin="$(mktemp)"
+  trap 'rm -f "$buildx_plugin"' RETURN
+  curl -fsSL "https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-${buildx_arch}" -o "$buildx_plugin"
+  "${SUDO[@]}" install -D -m 0755 "$buildx_plugin" /usr/local/lib/docker/cli-plugins/docker-buildx
+
+  buildx_version="$("${DOCKER[@]}" buildx version 2>/dev/null | sed -n 's/.* v\{0,1\}\([0-9][0-9.]*\).*/\1/p')"
+  if [[ -z "$buildx_version" ]] || ! version_is_at_least "$buildx_version" "0.17.0"; then
+    echo "Docker Buildx 0.17.0 or later installation failed." >&2
     exit 1
   fi
 }
@@ -127,6 +161,7 @@ else
 fi
 
 install_compose
+install_buildx
 
 if [[ -e "$INSTALL_DIR" && ! -d "$INSTALL_DIR/.git" ]]; then
   echo "$INSTALL_DIR exists but is not a Git repository; refusing to overwrite it." >&2
