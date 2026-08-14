@@ -54,10 +54,10 @@ install_docker() {
   fi
 }
 
-arm64_plugin_arch() {
+require_arm64() {
   case "$(uname -m)" in
     aarch64|arm64)
-      printf '%s\n' aarch64
+      return
       ;;
     *)
       echo "This installer supports Linux arm64 hosts only." >&2
@@ -78,7 +78,8 @@ install_compose() {
   fi
 
   local compose_arch
-  compose_arch="$(arm64_plugin_arch)"
+  require_arm64
+  compose_arch="aarch64"
 
   if ! require_command curl; then
     echo "Installing curl to download Docker Compose..."
@@ -106,7 +107,8 @@ install_buildx() {
 
   echo "Installing Docker Buildx 0.17.1..."
   local buildx_arch
-  buildx_arch="$(arm64_plugin_arch)"
+  require_arm64
+  buildx_arch="arm64"
   local buildx_plugin
   buildx_plugin="$(mktemp)"
   trap 'rm -f "$buildx_plugin"' RETURN
