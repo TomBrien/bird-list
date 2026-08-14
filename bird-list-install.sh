@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly REPOSITORY_URL="https://github.com/TomBrien/bird-list.git"
 readonly INSTALL_DIR="${HOME}/bird-list"
 readonly PORT_FILE="${INSTALL_DIR}/.env"
+readonly DATA_BACKUP_DIR="${HOME}/.local/share/bird-list"
 if ((EUID == 0)); then
   SUDO=()
 elif command -v sudo >/dev/null 2>&1; then
@@ -107,6 +108,10 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" pull --ff-only
 else
   git clone "$REPOSITORY_URL" "$INSTALL_DIR"
+fi
+
+if [[ -d "$DATA_BACKUP_DIR" && ! -e "$INSTALL_DIR/data" ]]; then
+  mv "$DATA_BACKUP_DIR" "$INSTALL_DIR/data"
 fi
 
 port="$(choose_port)"

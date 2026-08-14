@@ -63,3 +63,14 @@ It installs Git and Docker when needed, clones or updates the application in
 container, and configures it to restart after system startup. The installer may
 ask for your `sudo` password when installing system packages. If Docker was
 just installed, sign out and back in before using Docker commands manually.
+
+## Uninstall
+
+```bash
+~/bird-list/bird-list-uninstall.sh
+```
+
+The uninstaller stops and removes the container and application files. It asks
+whether to remove sightings; if retained, it saves them in
+`~/.local/share/bird-list` and restores them during a later installation.
+Docker and Git are left installed for other applications.
