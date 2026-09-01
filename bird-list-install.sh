@@ -146,6 +146,25 @@ choose_port() {
   printf '%s\n' "$port"
 }
 
+running_birdlist_container() {
+  [[ -f "$INSTALL_DIR/compose.yaml" ]] || return 0
+  "${DOCKER[@]}" compose -f "$INSTALL_DIR/compose.yaml" --project-directory "$INSTALL_DIR" \
+    ps -q --status running birdlist
+}
+
+container_port() {
+  local container="$1"
+  local port
+  port="$("${DOCKER[@]}" inspect --format '{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}' "$container")"
+
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    echo "Unable to determine the host port for the running bird-list container." >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$port"
+}
+
 if ! require_command git; then
   echo "Installing Git..."
   install_packages git
@@ -170,7 +189,15 @@ if [[ -e "$INSTALL_DIR" ]] && ! git -C "$INSTALL_DIR" rev-parse --is-inside-work
   exit 1
 fi
 
+port=""
 if [[ -e "$INSTALL_DIR" ]]; then
+  running_container="$(running_birdlist_container)"
+  if [[ -n "$running_container" ]]; then
+    port="$(container_port "$running_container")"
+    echo "Stopping the running bird-list container and preserving port ${port}..."
+    "${DOCKER[@]}" stop "$running_container" >/dev/null
+  fi
+
   echo "Updating existing bird-list checkout from origin/main..."
   git -C "$INSTALL_DIR" fetch origin main
   if ! git -C "$INSTALL_DIR" merge --ff-only FETCH_HEAD; then
@@ -185,7 +212,9 @@ if [[ -d "$DATA_BACKUP_DIR" && ! -e "$INSTALL_DIR/data" ]]; then
   mv "$DATA_BACKUP_DIR" "$INSTALL_DIR/data"
 fi
 
-port="$(choose_port)"
+if [[ -z "$port" ]]; then
+  port="$(choose_port)"
+fi
 printf 'BIRD_LIST_PORT=%s\n' "$port" >"$PORT_FILE"
 
 cd "$INSTALL_DIR"
