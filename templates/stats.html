@@ -1,0 +1,137 @@
+{{define "stats"}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stats - Bird List</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;--accent:#10b981}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,sans-serif}.shell{display:flex;min-height:100vh}.sidebar{width:220px;background:var(--card);padding:1.5rem;position:sticky;top:0;height:100vh}.brand{color:var(--accent);font-weight:700;font-size:1.25rem;margin-bottom:2rem}.nav a{display:block;color:var(--muted);text-decoration:none;padding:.7rem;border-radius:7px;margin:.3rem 0}.nav a:hover,.nav a.active{background:#163e37;color:var(--accent)}main{width:min(980px,100%);padding:2rem;margin:auto}.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.25rem}.muted{color:var(--muted)}.chart-wrap{position:relative}.chart{display:block;width:100%;height:auto;min-height:280px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}.chart:active{cursor:grabbing}.axis{stroke:var(--muted);stroke-width:1}.grid{stroke:var(--border);stroke-width:1}.line{fill:none;stroke:var(--accent);stroke-width:3;stroke-linejoin:round;stroke-linecap:round}.point{fill:var(--accent)}.label{fill:var(--muted);font-size:12px;user-select:none;-webkit-user-select:none}.tooltip{position:absolute;display:none;pointer-events:none;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.4rem .6rem;font-size:.85rem;transform:translate(-50%,-120%)}.chart-controls{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1rem}button{font:inherit;padding:.55rem .75rem;border-radius:7px;border:0;background:var(--accent);color:#052e27;font-weight:700;cursor:pointer}.recent-additions{list-style:none;padding:0;margin:0}.recent-additions li{padding:.7rem 0;border-bottom:1px solid var(--border)}.recent-additions li:last-child{border:0}.recent-additions a{color:var(--text);text-decoration:none}.recent-additions a:hover{color:var(--accent)}@media(max-width:650px){.sidebar{width:100%;height:auto;position:static}.shell{display:block}.nav{display:flex;gap:.5rem}.nav a{margin:0}.brand{margin-bottom:.75rem}main{padding:1rem}.card{padding:1rem}}
+</style>
+</head>
+<body><div class="shell"><aside class="sidebar"><div class="brand">Bird List</div><nav class="nav"><a href="/">Home</a><a href="/species">Species</a><a href="/visits">Visits</a><a class="active" href="/stats">Stats</a><a href="/settings">Settings</a></nav></aside><main><h1>Stats</h1><div class="card"><h2>Species total over time</h2><p class="muted">Cumulative unique species counted using your current species-count and off-list settings.</p>{{if .Points}}<div class="chart-wrap"><svg id="species-chart" class="chart" viewBox="0 0 900 360" role="img" aria-label="Cumulative unique species by date. Scroll or pinch to zoom, drag to pan." aria-describedby="chart-instructions" tabindex="0" data-points="{{range .Points}}{{.Date.Format "2006-01-02"}}:{{.Count}},{{end}}"></svg><div id="chart-tooltip" class="tooltip" aria-live="polite"></div></div><div class="chart-controls"><button id="chart-reset" type="button">Reset zoom</button><span id="chart-instructions" class="muted">Scroll or pinch to zoom. Drag to pan. Use arrow keys to pan, + or - to zoom.</span></div>{{else}}<p class="muted">No qualifying sightings yet.</p>{{end}}</div><div class="card"><h2>Recent species additions</h2>{{if .RecentAdditions}}<ul class="recent-additions">{{range .RecentAdditions}}<li><a href="/sightings/{{.ID}}"><strong>{{.Species}}</strong><span class="muted"> - {{.FirstObservedAt.Format "2006-01-02"}}, {{.Location}}</span></a></li>{{end}}</ul>{{else}}<p class="muted">No species additions yet.</p>{{end}}</div></main></div>
+<script>
+const chart = document.querySelector("#species-chart");
+if (chart) {
+  const points = chart.dataset.points.slice(0, -1).split(",").map(point => {
+    const [date, count] = point.split(":");
+    return { date, count: Number(count) };
+  });
+  const tooltip = document.querySelector("#chart-tooltip");
+  const reset = document.querySelector("#chart-reset");
+  const ns = "http://www.w3.org/2000/svg";
+  const left = 60, right = 45, top = 25, width = 900 - left - right, height = 290;
+  const minVisible = Math.min(2, points.length);
+  const pointers = new Map();
+  let start = 0, end = points.length - 1, drag, pinch;
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const visibleLength = () => end - start + 1;
+  const yDomain = visible => {
+    const minimum = Math.min(...visible.map(point => point.count));
+    const maximum = Math.max(...visible.map(point => point.count));
+    const padding = Math.max(1, Math.ceil((maximum - minimum) * .1));
+    return {minimum:Math.max(0, minimum - padding), maximum:maximum + padding};
+  };
+  const chartX = event => {
+    const rect = chart.getBoundingClientRect();
+    return clamp((event.clientX - rect.left) / rect.width * 900, left, left + width);
+  };
+  const indexAt = x => start + Math.round((x - left) / width * (visibleLength() - 1));
+  const add = (tag, attrs, text) => {
+    const element = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    if (text !== undefined) element.textContent = text;
+    chart.append(element);
+  };
+  const render = () => {
+    chart.replaceChildren();
+    const visible = points.slice(start, end + 1);
+    const domain = yDomain(visible);
+    const x = index => left + (visible.length === 1 ? width / 2 : index * width / (visible.length - 1));
+    const y = count => top + height - (count - domain.minimum) / (domain.maximum - domain.minimum) * height;
+    [domain.minimum, domain.maximum].forEach(value => {
+      add("line", {x1:left, y1:y(value), x2:left + width, y2:y(value), class:"grid"});
+      add("text", {x:left - 10, y:y(value) + 4, "text-anchor":"end", class:"label"}, value);
+    });
+    add("line", {x1:left, y1:top, x2:left, y2:top + height, class:"axis"});
+    add("line", {x1:left, y1:top + height, x2:left + width, y2:top + height, class:"axis"});
+    add("polyline", {points:visible.map((point, index) => `${x(index)},${y(point.count)}`).join(" "), class:"line"});
+    visible.forEach((point, index) => add("circle", {cx:x(index), cy:y(point.count), r:visible.length > 150 ? 1.5 : 3, class:"point"}));
+    [0, Math.floor((visible.length - 1) / 2), visible.length - 1].filter((value, index, all) => all.indexOf(value) === index).forEach(index => add("text", {x:x(index), y:top + height + 25, "text-anchor":"middle", class:"label"}, visible[index].date));
+    tooltip.style.display = "none";
+  };
+  const setWindow = (nextStart, length) => {
+    length = clamp(Math.round(length), minVisible, points.length);
+    start = clamp(Math.round(nextStart), 0, points.length - length);
+    end = start + length - 1;
+    render();
+  };
+  const zoom = (factor, anchor = 0.5) => {
+    const length = visibleLength();
+    const nextLength = clamp(Math.round(length * factor), minVisible, points.length);
+    const center = start + (length - 1) * anchor;
+    setWindow(center - (nextLength - 1) * anchor, nextLength);
+  };
+  const show = index => {
+    index = clamp(index, start, end);
+    const point = points[index];
+    const domain = yDomain(points.slice(start, end + 1));
+    const x = left + (index - start) * width / Math.max(visibleLength() - 1, 1);
+    const y = top + height - (point.count - domain.minimum) / (domain.maximum - domain.minimum) * height;
+    tooltip.textContent = `${point.date}: ${point.count} species`;
+    tooltip.style.display = "block";
+    tooltip.style.left = `${x / 900 * 100}%`;
+    tooltip.style.top = `${y / 360 * 100}%`;
+  };
+
+  chart.addEventListener("wheel", event => {
+    event.preventDefault();
+    zoom(event.deltaY > 0 ? 1.25 : .8, (chartX(event) - left) / width);
+  }, {passive:false});
+  chart.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    chart.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, chartX(event));
+    if (pointers.size === 1) drag = {x:chartX(event), start, length:visibleLength()};
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = {distance:Math.abs(a - b), center:(a + b) / 2};
+    }
+  });
+  chart.addEventListener("pointermove", event => {
+    if (!pointers.has(event.pointerId)) return show(indexAt(chartX(event)));
+    pointers.set(event.pointerId, chartX(event));
+    if (pointers.size === 2 && pinch) {
+      const [a, b] = [...pointers.values()];
+      const distance = Math.abs(a - b);
+      if (distance > 0) zoom(pinch.distance / distance, (pinch.center - left) / width);
+    } else if (drag) {
+      setWindow(drag.start - (chartX(event) - drag.x) / width * (drag.length - 1), drag.length);
+      show(indexAt(chartX(event)));
+    }
+  });
+  const release = event => {
+    pointers.delete(event.pointerId);
+    drag = pinch = undefined;
+    tooltip.style.display = "none";
+  };
+  chart.addEventListener("pointerup", release);
+  chart.addEventListener("pointercancel", release);
+  chart.addEventListener("pointerleave", () => { if (!pointers.size) tooltip.style.display = "none"; });
+  chart.addEventListener("keydown", event => {
+    if (event.key === "ArrowLeft") setWindow(start - Math.max(1, Math.floor(visibleLength() / 5)), visibleLength());
+    else if (event.key === "ArrowRight") setWindow(start + Math.max(1, Math.floor(visibleLength() / 5)), visibleLength());
+    else if (event.key === "+" || event.key === "=") zoom(.8);
+    else if (event.key === "-") zoom(1.25);
+    else if (event.key === "Home") setWindow(0, points.length);
+    else return;
+    event.preventDefault();
+  });
+  chart.addEventListener("focus", () => show(start + Math.floor((visibleLength() - 1) / 2)));
+  chart.addEventListener("blur", () => tooltip.style.display = "none");
+  reset.addEventListener("click", () => setWindow(0, points.length));
+  render();
+}
+</script></body></html>
+{{end}}
