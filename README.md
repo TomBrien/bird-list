@@ -61,9 +61,11 @@ Run the installer directly from a checkout:
 
 It installs Git and Docker when needed, clones or updates the application in
 `~/bird-list`, finds a free port starting at `8080`, starts the arm64 Docker
-container, and configures it to restart after system startup. The installer may
-ask for your `sudo` password when installing system packages. If Docker was
-just installed, sign out and back in before using Docker commands manually.
+container, and configures it to restart after system startup. When updating a
+running installation, it stops the container first and restarts it on its
+existing port. The installer may ask for your `sudo` password when installing
+system packages. If Docker was just installed, sign out and back in before
+using Docker commands manually.
 
 ## Uninstall
 
