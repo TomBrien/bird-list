@@ -18,7 +18,10 @@ import (
 	"github.com/TomBrien/bird-list/internal/data"
 )
 
-const defaultRecentLimit = 5
+const (
+	defaultRecentLimit = 5
+	statsRecentLimit   = 10
+)
 
 type Server struct {
 	repo      *data.Repository
@@ -58,6 +61,12 @@ type SettingsPageData struct {
 	Error          string
 	CountMode      string
 	IncludeOffList bool
+}
+
+type StatsPageData struct {
+	Points          []data.SpeciesCountPoint
+	RecentAdditions []data.RecentAddition
+	Error           string
 }
 
 type SightingPageData struct {
@@ -100,6 +109,7 @@ func NewServer(db *sql.DB) (*Server, error) {
 		filepath.Join(templateDir, "sighting.html"),
 		filepath.Join(templateDir, "visits.html"),
 		filepath.Join(templateDir, "visit.html"),
+		filepath.Join(templateDir, "stats.html"),
 	)
 	if err != nil {
 		return nil, err
@@ -118,6 +128,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /species", s.handleSpecies)
 	mux.HandleFunc("GET /visits", s.handleVisits)
 	mux.HandleFunc("GET /visits/{date}", s.handleVisit)
+	mux.HandleFunc("GET /stats", s.handleStats)
 	mux.HandleFunc("GET /api/species", s.handleSpeciesSuggestions)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("POST /settings/count-mode", s.handleCountMode)
@@ -298,6 +309,34 @@ func (s *Server) handleVisits(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	renderVisits(w, s.templates, VisitPageData{Visits: views})
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if err := s.EnsureSchema(r); err != nil {
+		http.Error(w, fmt.Sprintf("failed to initialize schema: %v", err), http.StatusInternalServerError)
+		return
+	}
+	countMode, err := s.repo.CountMode(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load count mode: %v", err), http.StatusInternalServerError)
+		return
+	}
+	includeOffList, err := s.repo.IncludeOffList(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load off-list setting: %v", err), http.StatusInternalServerError)
+		return
+	}
+	points, err := s.repo.CumulativeSpeciesCounts(r.Context(), data.Filter{Location: data.LocationUK}, countMode, includeOffList)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load species statistics: %v", err), http.StatusInternalServerError)
+		return
+	}
+	recent, err := s.repo.RecentAdditions(r.Context(), data.Filter{Location: data.LocationUK}, statsRecentLimit)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load recent species additions: %v", err), http.StatusInternalServerError)
+		return
+	}
+	renderStats(w, s.templates, StatsPageData{Points: points, RecentAdditions: recent})
 }
 
 func (s *Server) handleVisit(w http.ResponseWriter, r *http.Request) {
@@ -495,6 +534,12 @@ func renderVisits(w http.ResponseWriter, tmpl *template.Template, data VisitPage
 func renderVisit(w http.ResponseWriter, tmpl *template.Template, data VisitDetailPageData) {
 	if err := tmpl.ExecuteTemplate(w, "visit", data); err != nil {
 		http.Error(w, fmt.Sprintf("failed to render visit: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func renderStats(w http.ResponseWriter, tmpl *template.Template, data StatsPageData) {
+	if err := tmpl.ExecuteTemplate(w, "stats", data); err != nil {
+		http.Error(w, fmt.Sprintf("failed to render statistics: %v", err), http.StatusInternalServerError)
 	}
 }
 

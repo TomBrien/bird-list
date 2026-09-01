@@ -38,6 +38,11 @@ type RecentAddition struct {
 	Location        string
 }
 
+type SpeciesCountPoint struct {
+	Date  time.Time
+	Count int
+}
+
 type Sighting struct {
 	ID                int64
 	Species           string
@@ -243,6 +248,92 @@ WHERE ` + condition
 		return 0, err
 	}
 	return total, nil
+}
+
+func (r *Repository) CumulativeSpeciesCounts(ctx context.Context, filter Filter, countMode string, includeOffList bool) ([]SpeciesCountPoint, error) {
+	condition := `
+(is_subspecies = 0 OR (
+    is_subspecies = 1
+    AND is_historic_species = 0
+    AND parent_scientific_name <> ''
+    AND LOWER(scientific_name) NOT LIKE '% f. domestica'
+))`
+	if countMode == CountModeHistoric {
+		condition = `
+(is_subspecies = 0 OR (
+    is_subspecies = 1
+    AND parent_scientific_name <> ''
+    AND LOWER(scientific_name) NOT LIKE '% f. domestica'
+))`
+	}
+	query := `
+SELECT CASE
+    WHEN is_subspecies = 1
+        AND is_historic_species = 0
+        AND parent_scientific_name <> ''
+        THEN LOWER(parent_scientific_name)
+    WHEN scientific_name <> '' THEN LOWER(scientific_name)
+    ELSE species
+END, observed_at
+FROM sightings
+WHERE ` + condition
+	if !includeOffList {
+		query += " AND taxonomy_rank > 0"
+	}
+	args := make([]any, 0, 2)
+	query, args = applyLocationFilter(query, args, filter.Location)
+	query, args = applyYearFilter(query, args, filter.Year)
+	query += " ORDER BY observed_at ASC, id ASC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	firstSeen := make(map[string]time.Time)
+	for rows.Next() {
+		var speciesKey, observedRaw string
+		if err := rows.Scan(&speciesKey, &observedRaw); err != nil {
+			return nil, err
+		}
+		if _, exists := firstSeen[speciesKey]; exists {
+			continue
+		}
+		observedAt, err := parseObservedAt(observedRaw)
+		if err != nil {
+			return nil, err
+		}
+		firstSeen[speciesKey] = observedAt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(firstSeen) == 0 {
+		return []SpeciesCountPoint{}, nil
+	}
+
+	newSpeciesByDate := make(map[string]int)
+	var firstDate, lastDate time.Time
+	for _, observedAt := range firstSeen {
+		date := time.Date(observedAt.Year(), observedAt.Month(), observedAt.Day(), 0, 0, 0, 0, observedAt.Location())
+		dateKey := date.Format("2006-01-02")
+		newSpeciesByDate[dateKey]++
+		if firstDate.IsZero() || date.Before(firstDate) {
+			firstDate = date
+		}
+		if lastDate.IsZero() || date.After(lastDate) {
+			lastDate = date
+		}
+	}
+
+	points := make([]SpeciesCountPoint, 0, int(lastDate.Sub(firstDate).Hours()/24)+1)
+	total := 0
+	for date := firstDate; !date.After(lastDate); date = date.AddDate(0, 0, 1) {
+		total += newSpeciesByDate[date.Format("2006-01-02")]
+		points = append(points, SpeciesCountPoint{Date: date, Count: total})
+	}
+	return points, nil
 }
 
 func (r *Repository) IncludeOffList(ctx context.Context) (bool, error) {
@@ -1004,6 +1095,7 @@ func applyYearFilter(query string, args []any, year int) (string, []any) {
 func parseObservedAt(raw string) (time.Time, error) {
 	layouts := []string{
 		time.RFC3339Nano,
+		"2006-01-02",
 		"2006-01-02 15:04:05.999999999 -0700 MST",
 		"2006-01-02 15:04:05.999999999-07:00",
 		"2006-01-02 15:04:05.999999999",

@@ -100,6 +100,30 @@ func TestVisitsPageRenders(t *testing.T) {
 	}
 }
 
+func TestStatsPageRendersCumulativeGraph(t *testing.T) {
+	server, db := setupTestServer(t)
+	defer db.Close()
+
+	_, err := db.Exec(`
+INSERT INTO sightings (species, observed_at, location, region, notes, taxonomy_rank)
+VALUES
+	('Robin', '2025-01-01', 'Cardiff', 'uk', '', 1),
+	('Swan', '2025-01-03', 'Cardiff', 'uk', '', 1)`)
+	if err != nil {
+		t.Fatalf("insert sightings: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.Router().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stats", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "<h1>Stats</h1>") || !strings.Contains(body, `id="species-chart"`) || !strings.Contains(body, `id="chart-reset"`) || !strings.Contains(body, "pointerdown") || !strings.Contains(body, "2025-01-01:1,2025-01-02:1,2025-01-03:2,") || !strings.Contains(body, "<h2>Recent species additions</h2>") || !strings.Contains(body, "Swan</strong><span class=\"muted\"> - 2025-01-03, Cardiff") {
+		t.Fatalf("expected cumulative species graph, got: %s", body)
+	}
+}
+
 func TestVisitDetailAndSightingLink(t *testing.T) {
 	server, db := setupTestServer(t)
 	defer db.Close()

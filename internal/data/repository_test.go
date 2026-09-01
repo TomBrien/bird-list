@@ -62,6 +62,35 @@ func TestCountSightingsWithFilters(t *testing.T) {
 	}
 }
 
+func TestCumulativeSpeciesCountsUsesTotalCountRules(t *testing.T) {
+	repo := setupTestRepo(t)
+	_, err := repo.db.Exec(`
+INSERT INTO sightings (species, scientific_name, observed_at, location, region, parent_scientific_name, is_subspecies, is_historic_species, taxonomy_rank)
+VALUES
+	('Teal', 'Anas crecca', '2025-01-01', 'Cardiff', 'uk', '', 0, 0, 10),
+	('Pied Wagtail', 'Motacilla alba yarrellii', '2025-01-03', 'Cardiff', 'uk', 'motacilla alba', 1, 0, 11),
+	('White Wagtail', 'Motacilla alba', '2025-01-05', 'Cardiff', 'uk', '', 0, 0, 10),
+	('Unknown Bird', 'Unmatched bird', '2025-01-06', 'Cardiff', 'uk', '', 0, 0, 0)`)
+	if err != nil {
+		t.Fatalf("insert sightings: %v", err)
+	}
+
+	points, err := repo.CumulativeSpeciesCounts(context.Background(), Filter{Location: LocationUK}, CountModeModern, false)
+	if err != nil {
+		t.Fatalf("load cumulative counts: %v", err)
+	}
+	if len(points) != 3 || points[0].Count != 1 || points[2].Count != 2 {
+		t.Fatalf("want daily counts 1, 1, 2; got %#v", points)
+	}
+	total, err := repo.CountSightings(context.Background(), Filter{Location: LocationUK}, CountModeModern, false)
+	if err != nil {
+		t.Fatalf("count sightings: %v", err)
+	}
+	if points[len(points)-1].Count != total {
+		t.Fatalf("want final series count %d to match total count, got %d", total, points[len(points)-1].Count)
+	}
+}
+
 func TestSpeciesSightingsCaseInsensitive(t *testing.T) {
 	repo := setupTestRepo(t)
 	addSighting(t, repo, "Barn Owl", time.Now().UTC(), "Norfolk", LocationUK)
