@@ -33,6 +33,14 @@ if (chart) {
     const padding = Math.max(1, Math.ceil((maximum - minimum) * .1));
     return {minimum:Math.max(0, minimum - padding), maximum:maximum + padding};
   };
+  const yTicks = domain => {
+    const step = Math.max(1, Math.ceil((domain.maximum - domain.minimum) / 4));
+    const ticks = [];
+    for (let value = Math.ceil(domain.minimum / step) * step; value <= domain.maximum; value += step) ticks.push(value);
+    if (!ticks.includes(domain.minimum)) ticks.unshift(domain.minimum);
+    if (!ticks.includes(domain.maximum)) ticks.push(domain.maximum);
+    return ticks;
+  };
   const chartX = event => {
     const rect = chart.getBoundingClientRect();
     return clamp((event.clientX - rect.left) / rect.width * 900, left, left + width);
@@ -50,15 +58,20 @@ if (chart) {
     const domain = yDomain(visible);
     const x = index => left + (visible.length === 1 ? width / 2 : index * width / (visible.length - 1));
     const y = count => top + height - (count - domain.minimum) / (domain.maximum - domain.minimum) * height;
-    [domain.minimum, domain.maximum].forEach(value => {
+    yTicks(domain).forEach(value => {
       add("line", {x1:left, y1:y(value), x2:left + width, y2:y(value), class:"grid"});
       add("text", {x:left - 10, y:y(value) + 4, "text-anchor":"end", class:"label"}, value);
     });
+    const dateTickCount = Math.min(5, visible.length);
+    const dateTickIndices = Array.from({length:dateTickCount}, (_, index) => Math.round(index * (visible.length - 1) / Math.max(dateTickCount - 1, 1))).filter((value, index, all) => all.indexOf(value) === index);
+    dateTickIndices.forEach(index => add("line", {x1:x(index), y1:top, x2:x(index), y2:top + height, class:"grid"}));
     add("line", {x1:left, y1:top, x2:left, y2:top + height, class:"axis"});
     add("line", {x1:left, y1:top + height, x2:left + width, y2:top + height, class:"axis"});
     add("polyline", {points:visible.map((point, index) => `${x(index)},${y(point.count)}`).join(" "), class:"line"});
     visible.forEach((point, index) => add("circle", {cx:x(index), cy:y(point.count), r:visible.length > 150 ? 1.5 : 3, class:"point"}));
-    [0, Math.floor((visible.length - 1) / 2), visible.length - 1].filter((value, index, all) => all.indexOf(value) === index).forEach(index => add("text", {x:x(index), y:top + height + 25, "text-anchor":"middle", class:"label"}, visible[index].date));
+    dateTickIndices.forEach(index => {
+      add("text", {x:x(index), y:top + height + 25, "text-anchor":"middle", class:"label"}, visible[index].date);
+    });
     tooltip.style.display = "none";
   };
   const setWindow = (nextStart, length) => {
